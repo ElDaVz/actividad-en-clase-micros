@@ -1,0 +1,30 @@
+# --- Binarios y Salidas de C ---
+*.o
+*.obj
+*.out
+*.exe
+# Nombre específico de tu ejecutable actual (basado en tu código anterior)
+threads
+# Carpetas de compilación comunes
+build/
+bin/
+out/
+
+# --- Visual Studio Code ---
+.vscode/*
+# Permitir configuraciones de proyecto importantes
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# --- Depuración y Temporales ---
+*.dSYM/
+*.log
+*.tmp
+.history/
+
+# --- Otros ---
+.DS_Store
+Thumbs.db
