@@ -46,12 +46,99 @@
 #include <string>
 #include <cmath>
 #include <chrono>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <cstdlib>
+#include <pthread.h>
 
 using namespace std;
+
+struct DatosHilo {
+    string instruccion;
+    int numInstruccion;
+};
+
+bool esInstruccionValida(const string& instruccion);
+int binarioADecimal(const string& bits);
+
+void* funcionHilo(void* arg) {
+
+    DatosHilo* datos = (DatosHilo*)arg;
+    string instruccion = datos->instruccion;
+    int numInstruccion = datos->numInstruccion;
+
+    auto inicio = chrono::high_resolution_clock::now();
+
+    string opcodeBits    = instruccion.substr(0, 3); // bits 6-4
+    string operandoABits = instruccion.substr(3, 2); // bits 3-2
+    string operandoBBits = instruccion.substr(5, 2); // bits 1-0
+
+    int opcode    = binarioADecimal(opcodeBits);
+    int operandoA = binarioADecimal(operandoABits);
+    int operandoB = binarioADecimal(operandoBBits);
+
+    // Mapear OPCODE
+    string nombreOp;
+    bool opcodeValido = true;
+    switch (opcode)
+    {
+        case 0: nombreOp = "Suma";           break;
+        case 1: nombreOp = "Resta";          break;
+        case 2: nombreOp = "Multiplicacion"; break;
+        case 3: nombreOp = "Division";       break;
+        case 5: nombreOp = "Potencia";       break;
+        case 6: nombreOp = "Modulo";         break;
+        default:
+            nombreOp = "OPCODE invalido";    
+            opcodeValido = false;
+            break;
+
+    }
+
+    cout << "\nHilo TID: " << pthread_self()
+            << " ejecutando instruccion " << numInstruccion << endl;
+
+    cout << "  Instruccion " << numInstruccion << ": " << instruccion << endl;
+    cout << "   OPCODE: " << opcode << " (" << nombreOp << ")" << endl;
+    cout << "   A: " << operandoA << endl;
+    cout << "   B: " << operandoB << endl;
+
+    if (!opcodeValido)
+    {
+        cout << "   Resultado: Error. OPCODE " << opcode << " no reconocido." << endl;
+        cout << "Estado: NO VALIDO" << endl;
+    }
+    else if (opcode == 3 && operandoB == 0)
+    {
+        cout << "   Resultado: Error. Division por cero." << endl;
+        cout << "Estado: NO VALIDO" << endl;
+    }
+    else if (opcode == 6 && operandoB == 0)
+    {
+        cout << "   Resultado: Error. Modulo por cero." << endl;
+        cout << "Estado: NO VALIDO" << endl;
+    }
+    else
+    {
+        long long resultado = 0;
+        switch (opcode)
+        {
+            case 0: resultado = operandoA + operandoB;               break;
+            case 1: resultado = operandoA - operandoB;               break;
+            case 2: resultado = operandoA * operandoB;               break;
+            case 3: resultado = operandoA / operandoB;               break;
+            case 5: resultado = (long long)pow(operandoA, operandoB); break;
+            case 6: resultado = operandoA % operandoB;               break;
+        }
+        cout << "   Resultado: " << resultado << endl;
+        cout << "Estado: VALIDO" << endl;
+    }
+
+    auto fin      = chrono::high_resolution_clock::now();
+    auto duracion = chrono::duration_cast<chrono::microseconds>(fin - inicio).count();
+    cout << " - Tiempo de ejecucion: " << duracion << " microsegundos." << endl;
+
+    delete datos; // Liberar memoria asignada para los datos del hilo
+    pthread_exit(NULL);
+}
 
 bool esInstruccionValida(const string& instruccion)
 {
@@ -108,10 +195,10 @@ void ejecutarInstruccion(const string& instruccion, int numInstruccion, bool esP
 
     if (esPadre)
         cout << "\nProceso padre ejecutando instruccion " << numInstruccion
-            << ", PID: " << getpid() << endl;
+            << ", TID: " << pthread_self() << endl;
     else
         cout << "\nProceso hijo ejecutando instruccion " << numInstruccion
-            << ", PID: " << getpid() << endl;
+            << ", TID: " << pthread_self() << endl;
 
     cout << "  Instruccion " << numInstruccion << ": " << instruccion << endl;
     cout << "   OPCODE: " << opcode << " (" << nombreOp << ")" << endl;
@@ -147,8 +234,8 @@ void ejecutarInstruccion(const string& instruccion, int numInstruccion, bool esP
 
     auto fin      = chrono::high_resolution_clock::now();
     auto duracion = chrono::duration_cast<chrono::microseconds>(fin - inicio).count();
-    cout << "\nPID: " << getpid() << " - Tiempo de ejecucion: "
-        << duracion << " microsegundos." << endl;
+    cout << "\nTID: " << pthread_self() << " - Tiempo de ejecucion: "
+         << duracion << " microsegundos." << endl;
 }
 
 int main()
@@ -170,7 +257,7 @@ int main()
         if (!esInstruccionValida(token))
         {
             cerr << "Error: \"" << token
-                << "\" no es valida. Debe tener exactamente 7 bits (solo 0 y 1)." << endl;
+                 << "\" no es valida. Debe tener exactamente 7 bits (solo 0 y 1)." << endl;
             hayInvalidas = true;
         }
         else
@@ -190,31 +277,23 @@ int main()
     if (n < 3)
     {
         cerr << "Error: se requieren al menos 3 instrucciones validas. "
-            << "Se ingresaron: " << n << "." << endl;
+             << "Se ingresaron: " << n << "." << endl;
         return EXIT_FAILURE;
     }
 
-    ejecutarInstruccion(instrucciones[0], 1, true);
+    cout << "\nCreando instrucciones para procesos e hilos..." << endl;
+
+    vector<pthread_t> hilos(n);
 
     for (int i = 1; i < n; i++)
     {
-        pid_t pid = fork();
-
-        if (pid < 0)
+        DatosHilo* datos = new DatosHilo{instrucciones[i], i + 1}; // Crear struct con datos para el hilo
+        if (pthread_create(&hilos[i], NULL, funcionHilo, datos) != 0)
         {
-            // Error al crear proceso
-            cerr << "Error: fork() fallo para la instruccion " << (i + 1) << "." << endl;
-            return EXIT_FAILURE;
-        }
-        else if (pid == 0)
-        {
-            ejecutarInstruccion(instrucciones[i], i + 1, false);
-            exit(EXIT_SUCCESS);
-        }
-        else
-        {
-            int status;
-            wait(&status);
+            cerr << "Error: no se pudo crear el hilo para la instruccion "
+                 << i + 1 << "." << endl;
+            delete datos; // Liberar memoria si no se pudo crear el hilo
+            continue;
         }
     }
 
