@@ -50,7 +50,7 @@
 #include <pthread.h>
 
 using namespace std;
-
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 struct DatosHilo {
     string instruccion;
     int numInstruccion;
@@ -67,17 +67,17 @@ void* funcionHilo(void* arg) {
 
     auto inicio = chrono::high_resolution_clock::now();
 
-    string opcodeBits    = instruccion.substr(0, 3); // bits 6-4
-    string operandoABits = instruccion.substr(3, 2); // bits 3-2
-    string operandoBBits = instruccion.substr(5, 2); // bits 1-0
+    string opcodeBits    = instruccion.substr(0, 3);
+    string operandoABits = instruccion.substr(3, 2);
+    string operandoBBits = instruccion.substr(5, 2);
 
     int opcode    = binarioADecimal(opcodeBits);
     int operandoA = binarioADecimal(operandoABits);
     int operandoB = binarioADecimal(operandoBBits);
 
-    // Mapear OPCODE
     string nombreOp;
     bool opcodeValido = true;
+
     switch (opcode)
     {
         case 0: nombreOp = "Suma";           break;
@@ -87,38 +87,31 @@ void* funcionHilo(void* arg) {
         case 5: nombreOp = "Potencia";       break;
         case 6: nombreOp = "Modulo";         break;
         default:
-            nombreOp = "OPCODE invalido";    
+            nombreOp = "OPCODE invalido";
             opcodeValido = false;
             break;
-
     }
 
-    cout << "\nHilo TID: " << pthread_self()
-            << " ejecutando instruccion " << numInstruccion << endl;
+    int validas = 0;
+    int invalidas = 0;
+    long long resultado = 0;
 
-    cout << "  Instruccion " << numInstruccion << ": " << instruccion << endl;
-    cout << "   OPCODE: " << opcode << " (" << nombreOp << ")" << endl;
-    cout << "   A: " << operandoA << endl;
-    cout << "   B: " << operandoB << endl;
+    bool esValida = true;
 
     if (!opcodeValido)
     {
-        cout << "   Resultado: Error. OPCODE " << opcode << " no reconocido." << endl;
-        cout << "Estado: NO VALIDO" << endl;
+        esValida = false;
     }
     else if (opcode == 3 && operandoB == 0)
     {
-        cout << "   Resultado: Error. Division por cero." << endl;
-        cout << "Estado: NO VALIDO" << endl;
+        esValida = false;
     }
     else if (opcode == 6 && operandoB == 0)
     {
-        cout << "   Resultado: Error. Modulo por cero." << endl;
-        cout << "Estado: NO VALIDO" << endl;
+        esValida = false;
     }
     else
     {
-        long long resultado = 0;
         switch (opcode)
         {
             case 0: resultado = operandoA + operandoB;               break;
@@ -128,15 +121,51 @@ void* funcionHilo(void* arg) {
             case 5: resultado = (long long)pow(operandoA, operandoB); break;
             case 6: resultado = operandoA % operandoB;               break;
         }
+    }
+
+    if (esValida) validas++;
+    else invalidas++;
+
+    auto fin      = chrono::high_resolution_clock::now();
+    auto duracion = chrono::duration_cast<chrono::microseconds>(fin - inicio).count();
+
+    // 🔒 BLOQUE CRÍTICO (todo el cout protegido)
+    pthread_mutex_lock(&lock);
+
+    cout << "\nHilo TID: " << pthread_self()
+         << " ejecutando instruccion " << numInstruccion << endl;
+
+    cout << "  Instruccion " << numInstruccion << ": " << instruccion << endl;
+    cout << "   OPCODE: " << opcode << " (" << nombreOp << ")" << endl;
+    cout << "   A: " << operandoA << endl;
+    cout << "   B: " << operandoB << endl;
+
+    if (!esValida)
+    {
+        if (!opcodeValido)
+            cout << "   Resultado: Error. OPCODE no reconocido." << endl;
+        else if (opcode == 3 && operandoB == 0)
+            cout << "   Resultado: Error. Division por cero." << endl;
+        else if (opcode == 6 && operandoB == 0)
+            cout << "   Resultado: Error. Modulo por cero." << endl;
+
+        cout << "Estado: NO VALIDO" << endl;
+    }
+    else
+    {
         cout << "   Resultado: " << resultado << endl;
         cout << "Estado: VALIDO" << endl;
     }
 
-    auto fin      = chrono::high_resolution_clock::now();
-    auto duracion = chrono::duration_cast<chrono::microseconds>(fin - inicio).count();
+    cout << "Resumen hilo " << numInstruccion
+         << ": Validas=" << validas
+         << ", Invalidas=" << invalidas << endl;
+
     cout << " - Tiempo de ejecucion: " << duracion << " microsegundos." << endl;
 
-    delete datos; // Liberar memoria asignada para los datos del hilo
+    pthread_mutex_unlock(&lock);
+
+    delete datos;
     pthread_exit(NULL);
 }
 
@@ -285,7 +314,7 @@ int main()
 
     vector<pthread_t> hilos(n);
 
-    for (int i = 1; i < n; i++)
+    for (int i = 0; i < n; i++)
     {
         DatosHilo* datos = new DatosHilo{instrucciones[i], i + 1}; // Crear struct con datos para el hilo
         if (pthread_create(&hilos[i], NULL, funcionHilo, datos) != 0)
@@ -295,6 +324,11 @@ int main()
             delete datos; // Liberar memoria si no se pudo crear el hilo
             continue;
         }
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        pthread_join(hilos[i], NULL);
     }
 
     cout << "\nTodos los procesos han finalizado. Compilador paralelo terminado." << endl;
